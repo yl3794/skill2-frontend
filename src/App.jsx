@@ -64,17 +64,17 @@ function LandingPage({ worker, nav }) {
       <main className="landing-hero">
         <div className="hero-badge">
           <span className="hero-badge-dot" />
-          AI-Powered · Real-Time · Certified
+          AI-Powered · Real-Time · Verified Progress
         </div>
 
         <h1 className="hero-title">
           Train smarter.<br />
-          Get <span className="accent">certified</span>.
+          Track <span className="accent">progress</span>.
         </h1>
 
         <p className="hero-subtitle">
-          Real-time AI coaching watches your form, guides every rep, and issues
-          industry-recognized certifications for physical trade skills.
+          Real-time AI coaching watches your form, guides every rep, and tracks
+          completion across your organisation's training programs.
         </p>
 
         {worker ? (
@@ -123,8 +123,8 @@ function LandingPage({ worker, nav }) {
         </div>
         <div className="feature-card">
           <span className="feature-card-icon">✦</span>
-          <h3>Verified Certification</h3>
-          <p>Earn cryptographically signed certificates any employer can instantly verify — no middleman.</p>
+          <h3>Program Completion</h3>
+          <p>Complete training programs set by your organisation and build a verified record of your progress.</p>
         </div>
       </div>
 
@@ -227,32 +227,43 @@ function TrainingPage({ worker, nav }) {
   const [tipHistory, setTipHistory]   = useState([])
   const [repCount, setRepCount]       = useState(0)
   const [scoreHistory, setScoreHistory] = useState([])
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [workerProgress, setWorkerProgress] = useState([])
+  const [programs, setPrograms]       = useState([])
+  const [selectedSkill, setSelectedSkill] = useState({ skill_id: 'lifting', display_name: 'Safe Lifting Technique' })
   const intervalRef    = useRef(null)
   const sessionRef     = useRef(null)
   const scoreHistRef   = useRef([])
   const tipListRef     = useRef(null)
 
+  useEffect(() => {
+    if (worker) {
+      fetch(`${API}/workers/${worker.id}/progress`, { headers: { 'X-API-Key': worker.api_key } })
+        .then(r => r.ok ? r.json() : []).then(setWorkerProgress).catch(() => {})
+      fetch(`${API}/programs`, { headers: { 'X-API-Key': worker.api_key } })
+        .then(r => r.ok ? r.json() : []).then(setPrograms).catch(() => {})
+    }
+  }, [worker])
+
   useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
 
   const captureAndSend = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ skill_id: 'lifting' })
+      const params = new URLSearchParams({ skill_id: selectedSkill.skill_id })
       if (sessionRef.current) params.append('session_id', sessionRef.current)
       const r = await fetch(`${API}/coach?${params}`, { method: 'POST' })
       const data = await r.json()
-
       setCurrentScore(data.score)
       setIsGoodForm(data.is_good_form)
       setTipHistory(prev => [{ text: data.coaching_tip, good: data.is_good_form, score: data.score, id: Date.now() }, ...prev.slice(0, 19)])
       setScoreHistory(prev => { const n = [...prev, data.score]; scoreHistRef.current = n; return n })
       if (data.is_good_form) setRepCount(p => p + 1)
-
       const u = new SpeechSynthesisUtterance(data.coaching_tip)
       u.rate = 1.05; u.pitch = 1.0
       window.speechSynthesis.cancel()
       window.speechSynthesis.speak(u)
     } catch (e) { console.error(e) }
-  }, [])
+  }, [selectedSkill.skill_id])
 
   const beginSession = async () => {
     if (worker) {
@@ -260,7 +271,7 @@ function TrainingPage({ worker, nav }) {
         const r = await fetch(`${API}/sessions/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-API-Key': worker.api_key },
-          body: JSON.stringify({ worker_id: worker.id, skill_id: 'lifting' })
+          body: JSON.stringify({ worker_id: worker.id, skill_id: selectedSkill.skill_id })
         })
         if (r.status === 401) { localStorage.removeItem('skill2_worker'); nav.landing(); return }
         sessionRef.current = (await r.json()).id
@@ -275,134 +286,191 @@ function TrainingPage({ worker, nav }) {
     setIsTraining(false)
     setEnding(true)
     window.speechSynthesis.cancel()
-
     let session = null, cert = null, debrief = null
     if (sessionRef.current && worker) {
       try {
         session = await fetch(`${API}/sessions/${sessionRef.current}/end`, {
           method: 'POST', headers: { 'X-API-Key': worker.api_key }
         }).then(r => r.json())
-
         const debriefRes = await fetch(`${API}/sessions/${sessionRef.current}/debrief`, {
           method: 'POST', headers: { 'X-API-Key': worker.api_key }
         })
         debrief = debriefRes.ok ? (await debriefRes.json()).debrief : null
-
-        cert = await fetch(`${API}/workers/${worker.id}/certify/lifting`, {
+        cert = await fetch(`${API}/workers/${worker.id}/certify/${selectedSkill.skill_id}`, {
           method: 'POST', headers: { 'X-API-Key': worker.api_key }
         }).then(r => r.json())
       } catch (e) { console.error(e) }
     }
     setEnding(false)
-    nav.summary({ session, cert, debrief, scoreHistory: scoreHistRef.current })
+    nav.summary({ session, cert, debrief, scoreHistory: scoreHistRef.current, skillName: selectedSkill.display_name })
+  }
+
+  const selectSkill = (skill_id, display_name) => {
+    if (isTraining) return
+    setSelectedSkill({ skill_id, display_name })
+    setTipHistory([]); setScoreHistory([]); scoreHistRef.current = []
+    setCurrentScore(null); setRepCount(0)
   }
 
   const avgScore = scoreHistory.length
     ? Math.round(scoreHistory.reduce((a, b) => a + b, 0) / scoreHistory.length)
     : 0
 
+  const displayPrograms = workerProgress.length > 0 ? null : programs
+
   return (
     <div className="training-page">
       <header className="page-header">
         <button className="ghost-btn" onClick={nav.landing}>← Back</button>
-        <h1 className="page-title">Lifting <span className="accent">Training</span></h1>
-        <div className={`live-badge ${isTraining ? 'live' : ''}`}>
-          <span className="live-dot" />
-          {isTraining ? 'Live' : worker?.name || 'Ready'}
+        <h1 className="page-title">{selectedSkill.display_name} <span className="accent">Training</span></h1>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button className={`ghost-btn ${sidebarOpen ? 'sidebar-btn-active' : ''}`} onClick={() => setSidebarOpen(o => !o)}>
+            ☰ Programs
+          </button>
+          <div className={`live-badge ${isTraining ? 'live' : ''}`}>
+            <span className="live-dot" />
+            {isTraining ? 'Live' : worker?.name || 'Ready'}
+          </div>
         </div>
       </header>
 
-      <div className="training-grid">
-        {/* Camera */}
-        <div className="camera-col">
-          <div className="camera-wrap">
-            <img src={`${API}/video`} className="camera-feed" alt="pose" />
-
-            {currentScore !== null && isTraining && (
-              <div className={`score-overlay ${isGoodForm ? 'good' : 'bad'}`}>
-                <span className="score-big">{currentScore}</span>
-                <span className="score-denom">/100</span>
-              </div>
-            )}
-            {isTraining && isGoodForm !== null && (
-              <div className={`form-pill ${isGoodForm ? 'good' : 'bad'}`}>
-                {isGoodForm ? '✓ Good Form' : '✗ Fix Form'}
-              </div>
-            )}
-          </div>
-
-          {!isTraining
-            ? <button className="session-btn start" onClick={beginSession} disabled={ending}>▶ Begin Session</button>
-            : <button className="session-btn stop" onClick={endSession} disabled={ending}>{ending ? 'Saving...' : '■ End Session'}</button>
-          }
-        </div>
-
-        {/* Right panel */}
-        <div className="info-col">
-
-          {/* Coach panel */}
-          <div className="panel coach-panel">
-            <div className="panel-label">
-              <span>🎯</span>
-              <span>AI Coach</span>
-              {isTraining && <span className="thinking-dots"><span /><span /><span /></span>}
-            </div>
-
-            {tipHistory.length === 0 ? (
-              <p className="coach-idle">Press Begin Session to start receiving coaching.</p>
-            ) : (
-              <div className="tip-feed" ref={tipListRef}>
-                {tipHistory.map((t, i) => (
-                  <div key={t.id} className={`tip-item ${i === 0 ? 'tip-latest' : 'tip-old'} ${t.good ? 'tip-good' : 'tip-warn'}`}>
-                    <span className={`tip-dot ${t.good ? 'good' : 'warn'}`} />
-                    <span className="tip-text">{t.text}</span>
-                    <span className="tip-score">{t.score}</span>
+      <div className={`training-layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        {sidebarOpen && (
+          <aside className="programs-sidebar">
+            <div className="sidebar-scroll">
+              {workerProgress.length > 0 && workerProgress.map(prog => (
+                <div key={prog.program_id} className="sidebar-program">
+                  <div className="sidebar-prog-header">
+                    <span className="sidebar-prog-name">{prog.program_name}</span>
+                    <span className="sidebar-prog-pct">{prog.completion_pct}%</span>
                   </div>
-                ))}
+                  <div className="sidebar-prog-bar">
+                    <div className="sidebar-prog-fill" style={{ width: `${prog.completion_pct}%` }} />
+                  </div>
+                  <div className="sidebar-skills">
+                    {prog.skill_progress.map(sk => (
+                      <button key={sk.skill_id}
+                        className={`sidebar-skill ${selectedSkill.skill_id === sk.skill_id ? 'selected' : ''} ${sk.certified ? 'certified' : ''}`}
+                        onClick={() => selectSkill(sk.skill_id, sk.display_name)}
+                        disabled={isTraining}>
+                        <span className="sk-icon">{sk.certified ? '✦' : sk.sessions_done > 0 ? '●' : '○'}</span>
+                        <span className="sk-name">{sk.display_name}</span>
+                        <span className="sk-prog">{sk.sessions_done}/{sk.sessions_needed}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {displayPrograms && displayPrograms.length > 0 && displayPrograms.map(prog => (
+                <div key={prog.id} className="sidebar-program">
+                  <div className="sidebar-prog-header">
+                    <span className="sidebar-prog-name">{prog.name}</span>
+                  </div>
+                  <div className="sidebar-skills">
+                    {(prog.skills_info || []).map(sk => (
+                      <button key={sk.skill_id}
+                        className={`sidebar-skill ${selectedSkill.skill_id === sk.skill_id ? 'selected' : ''}`}
+                        onClick={() => selectSkill(sk.skill_id, sk.display_name)}
+                        disabled={isTraining}>
+                        <span className="sk-icon">○</span>
+                        <span className="sk-name">{sk.display_name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div className="sidebar-program">
+                <div className="sidebar-prog-header">
+                  <span className="sidebar-prog-name">Built-in Skills</span>
+                </div>
+                <div className="sidebar-skills">
+                  <button
+                    className={`sidebar-skill ${selectedSkill.skill_id === 'lifting' ? 'selected' : ''}`}
+                    onClick={() => selectSkill('lifting', 'Safe Lifting Technique')}
+                    disabled={isTraining}>
+                    <span className="sk-icon">○</span>
+                    <span className="sk-name">Safe Lifting Technique</span>
+                  </button>
+                </div>
+              </div>
+
+              {workerProgress.length === 0 && programs.length === 0 && (
+                <p className="sidebar-hint">No training programs yet. Your organization can create them from the dashboard.</p>
+              )}
+            </div>
+          </aside>
+        )}
+
+        <div className="training-grid">
+          <div className="camera-col">
+            <div className="camera-wrap">
+              <img src={`${API}/video`} className="camera-feed" alt="pose" />
+              {currentScore !== null && isTraining && (
+                <div className={`score-overlay ${isGoodForm ? 'good' : 'bad'}`}>
+                  <span className="score-big">{currentScore}</span>
+                  <span className="score-denom">/100</span>
+                </div>
+              )}
+              {isTraining && isGoodForm !== null && (
+                <div className={`form-pill ${isGoodForm ? 'good' : 'bad'}`}>
+                  {isGoodForm ? '✓ Good Form' : '✗ Fix Form'}
+                </div>
+              )}
+            </div>
+            {!isTraining
+              ? <button className="session-btn start" onClick={beginSession} disabled={ending}>▶ Begin Session</button>
+              : <button className="session-btn stop" onClick={endSession} disabled={ending}>{ending ? 'Saving...' : '■ End Session'}</button>
+            }
+          </div>
+
+          <div className="info-col">
+            <div className="panel coach-panel">
+              <div className="panel-label">
+                <span>🎯</span><span>AI Coach</span>
+                {isTraining && <span className="thinking-dots"><span /><span /><span /></span>}
+              </div>
+              {tipHistory.length === 0
+                ? <p className="coach-idle">Press Begin Session to start receiving coaching.</p>
+                : (
+                  <div className="tip-feed" ref={tipListRef}>
+                    {tipHistory.map((t, i) => (
+                      <div key={t.id} className={`tip-item ${i === 0 ? 'tip-latest' : 'tip-old'} ${t.good ? 'tip-good' : 'tip-warn'}`}>
+                        <span className={`tip-dot ${t.good ? 'good' : 'warn'}`} />
+                        <span className="tip-text">{t.text}</span>
+                        <span className="tip-score">{t.score}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+            </div>
+
+            <div className="panel stats-panel">
+              <div className="panel-label"><span>📊</span><span>Session Stats</span></div>
+              <div className="stats-grid">
+                <div className="stat"><span className="stat-val">{repCount}</span><span className="stat-lbl">Good Reps</span></div>
+                <div className="stat"><span className="stat-val">{currentScore ?? '—'}</span><span className="stat-lbl">Current</span></div>
+                <div className="stat"><span className="stat-val">{avgScore || '—'}</span><span className="stat-lbl">Avg Score</span></div>
+                <div className="stat"><span className="stat-val">{scoreHistory.length}</span><span className="stat-lbl">Analyses</span></div>
+              </div>
+            </div>
+
+            {scoreHistory.length > 1 && (
+              <div className="panel chart-panel">
+                <div className="panel-label"><span>📈</span><span>Progress</span></div>
+                <div className="bar-chart">
+                  {scoreHistory.map((s, i) => (
+                    <div key={i} className="bar-wrap" title={`Rep ${i + 1}: ${s}`}>
+                      <div className="bar" style={{ height: `${s}%`, background: s >= 70 ? 'var(--accent)' : s >= 50 ? 'var(--warning)' : 'var(--danger)' }} />
+                    </div>
+                  ))}
+                </div>
+                <div className="chart-axis"><span>Start</span><span>Now</span></div>
               </div>
             )}
           </div>
-
-          {/* Stats */}
-          <div className="panel stats-panel">
-            <div className="panel-label"><span>📊</span><span>Session Stats</span></div>
-            <div className="stats-grid">
-              <div className="stat">
-                <span className="stat-val">{repCount}</span>
-                <span className="stat-lbl">Good Reps</span>
-              </div>
-              <div className="stat">
-                <span className="stat-val">{currentScore ?? '—'}</span>
-                <span className="stat-lbl">Current</span>
-              </div>
-              <div className="stat">
-                <span className="stat-val">{avgScore || '—'}</span>
-                <span className="stat-lbl">Avg Score</span>
-              </div>
-              <div className="stat">
-                <span className="stat-val">{scoreHistory.length}</span>
-                <span className="stat-lbl">Analyses</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Chart */}
-          {scoreHistory.length > 1 && (
-            <div className="panel chart-panel">
-              <div className="panel-label"><span>📈</span><span>Progress</span></div>
-              <div className="bar-chart">
-                {scoreHistory.map((s, i) => (
-                  <div key={i} className="bar-wrap" title={`Rep ${i + 1}: ${s}`}>
-                    <div className="bar" style={{
-                      height: `${s}%`,
-                      background: s >= 70 ? 'var(--accent)' : s >= 50 ? 'var(--warning)' : 'var(--danger)'
-                    }} />
-                  </div>
-                ))}
-              </div>
-              <div className="chart-axis"><span>Start</span><span>Now</span></div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -480,28 +548,25 @@ function SummaryPage({ data, worker, nav }) {
           </div>
         )}
 
-        {/* Certification */}
+        {/* Completion status */}
         {cert && (
           cert.certified ? (
             <div className="cert-card certified">
               <div className="cert-card-left">
                 <span className="cert-star">✦</span>
                 <div>
-                  <h3>Certified</h3>
-                  <p>Safe Lifting Technique</p>
-                  <p className="cert-meta">Issued to {worker?.name} · Expires {new Date(cert.expires_at).toLocaleDateString()}</p>
+                  <h3>Skill Completed</h3>
+                  <p>{cert.skill_id || 'Training Skill'}</p>
+                  <p className="cert-meta">Completed by {worker?.name} · Valid until {new Date(cert.expires_at).toLocaleDateString()}</p>
                 </div>
               </div>
-              <a className="cert-verify-btn" href={`${API}/certifications/${cert.cert_id}/verify`} target="_blank" rel="noreferrer">
-                Verify →
-              </a>
             </div>
           ) : (
             <div className="cert-card pending">
               <div className="cert-card-left">
                 <span className="cert-star dim">◎</span>
                 <div>
-                  <h3>Not Yet Certified</h3>
+                  <h3>In Progress</h3>
                   <p className="cert-reason">{cert.reason}</p>
                   {cert.avg_score != null && <p className="cert-meta">Your avg: {cert.avg_score} · Required: 75</p>}
                 </div>
@@ -596,7 +661,7 @@ function OrgAuthPage({ setOrg, nav }) {
         <div className="auth-card-header">
           <span className="auth-card-icon">🏢</span>
           <h1>Organization Portal</h1>
-          <p>Manage your workforce, register skills, and track certifications.</p>
+          <p>Manage your workforce, register skills, and track training progress.</p>
         </div>
 
         <div className="tab-row">
@@ -651,7 +716,7 @@ function OrgDashboard({ org, nav }) {
           )}
         </div>
         <nav className="dash-tabs">
-          {['overview', 'workers', 'skills'].map(t => (
+          {['overview', 'workers', 'skills', 'programs'].map(t => (
             <button key={t} className={`dash-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
@@ -663,7 +728,8 @@ function OrgDashboard({ org, nav }) {
       <div className="dash-body">
         {tab === 'overview' && <OverviewTab org={org} headers={headers} />}
         {tab === 'workers'  && <WorkersTab  org={org} headers={headers} />}
-        {tab === 'skills'   && <SkillsTab   org={org} headers={headers} />}
+        {tab === 'skills'    && <SkillsTab    org={org} headers={headers} />}
+        {tab === 'programs'  && <ProgramsTab  org={org} headers={headers} />}
       </div>
     </div>
   )
@@ -735,7 +801,7 @@ function WorkersTab({ org, headers }) {
                   <p className="worker-card-meta">{w.total_sessions} sessions · Avg {w.avg_score ?? '—'}</p>
                 </div>
                 <span className={`status-badge ${w.certified ? 'certified' : 'pending'}`}>
-                  {w.certified ? '✦ Certified' : '◎ In Progress'}
+                  {w.certified ? '✦ Completed' : '◎ In Progress'}
                 </span>
               </div>
             ))}
@@ -818,7 +884,7 @@ function SkillsTab({ org, headers }) {
                 onChange={e => setForm(f => ({ ...f, skillId: e.target.value }))} />
             </div>
             <div className="form-field">
-              <label>Sessions to Certify</label>
+              <label>Sessions to Complete</label>
               <input className="form-input" type="number" value={form.minSessions}
                 onChange={e => setForm(f => ({ ...f, minSessions: parseInt(e.target.value) }))} />
             </div>
@@ -870,12 +936,213 @@ function SkillsTab({ org, headers }) {
             <p className="skill-card-name">{s.definition.display_name || s.id}</p>
             <p className="skill-card-meta">
               {s.definition.form_rules?.length ?? 0} rules ·
-              Certify after {s.definition.certification?.min_sessions ?? '—'} sessions ·
+              Complete after {s.definition.certification?.min_sessions ?? '—'} sessions ·
               Min score {s.definition.certification?.min_avg_score ?? '—'}
             </p>
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ── Programs Tab ───────────────────────────────────────────────
+function ProgramsTab({ org, headers }) {
+  const [programs, setPrograms]       = useState(null)
+  const [manualText, setManualText]   = useState('')
+  const [programName, setProgramName] = useState('')
+  const [generating, setGenerating]   = useState(false)
+  const [extracting, setExtracting]   = useState(false)
+  const [preview, setPreview]         = useState(null)
+  const [error, setError]             = useState('')
+  const [showUpload, setShowUpload]   = useState(false)
+  const [droppedFile, setDroppedFile] = useState(null)
+  const [dragOver, setDragOver]       = useState(false)
+  const fileInputRef = useRef(null)
+
+  const load = () => fetch(`${API}/programs`, { headers }).then(r => r.json()).then(setPrograms).catch(() => setPrograms([]))
+  useEffect(() => { load() }, [])
+
+  const processFile = async (file) => {
+    setDroppedFile(file)
+    setError('')
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.txt') || name.endsWith('.md')) {
+      const text = await file.text()
+      setManualText(text)
+    } else {
+      setExtracting(true)
+      try {
+        const form = new FormData()
+        form.append('file', file)
+        const r = await fetch(`${API}/programs/extract-text`, { method: 'POST', headers, body: form })
+        const data = await r.json()
+        if (!r.ok) { setError(data.detail || 'Could not read file'); setExtracting(false); return }
+        setManualText(data.text)
+      } catch { setError('Could not connect to server') }
+      setExtracting(false)
+    }
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file) processFile(file)
+  }
+
+  const handleFileInput = (e) => {
+    const file = e.target.files[0]
+    if (file) processFile(file)
+  }
+
+  const handleGenerate = async () => {
+    if (!manualText.trim()) { setError('Add a file or paste text above'); return }
+    setGenerating(true); setError(''); setPreview(null)
+    try {
+      const r = await fetch(`${API}/programs/from-manual`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_text: manualText, program_name: programName.trim() || null })
+      })
+      const data = await r.json()
+      if (!r.ok) { setError(data.detail || 'Generation failed'); setGenerating(false); return }
+      setPreview(data)
+      await load()
+      setShowUpload(false)
+      setManualText('')
+      setProgramName('')
+      setDroppedFile(null)
+    } catch { setError('Could not connect to server') }
+    setGenerating(false)
+  }
+
+  if (!programs) return <div className="dash-loading">Loading...</div>
+
+  return (
+    <div className="dash-section">
+      <div className="dash-section-top">
+        <h2 className="dash-heading">Training Programs <span className="count-pill">{programs.length}</span></h2>
+        <button className="outline-btn" onClick={() => { setShowUpload(s => !s); setPreview(null); setError(''); setDroppedFile(null); setManualText('') }}>
+          {showUpload ? 'Cancel' : '+ Create from Manual'}
+        </button>
+      </div>
+
+      {showUpload && (
+        <div className="panel manual-upload-panel">
+          <div className="panel-label"><span>📄</span><span>Create Training Program from Manual</span></div>
+          <p className="upload-hint">Drop your training manual, safety document, or requirements file. Claude will extract posture-based skills and build a structured training program.</p>
+
+          {/* Drop zone */}
+          <div
+            className={`drop-zone ${dragOver ? 'drag-over' : ''} ${droppedFile ? 'has-file' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input ref={fileInputRef} type="file" accept=".txt,.md,.pdf,.docx" style={{ display: 'none' }} onChange={handleFileInput} />
+            {extracting ? (
+              <div className="drop-zone-content">
+                <span className="drop-zone-icon">⏳</span>
+                <p className="drop-zone-label">Reading file<span className="thinking-dots" style={{display:'inline-flex',marginLeft:'4px'}}><span/><span/><span/></span></p>
+              </div>
+            ) : droppedFile ? (
+              <div className="drop-zone-content">
+                <span className="drop-zone-icon">✓</span>
+                <p className="drop-zone-label">{droppedFile.name}</p>
+                <p className="drop-zone-sub">{manualText.length.toLocaleString()} characters extracted · Click to replace</p>
+              </div>
+            ) : (
+              <div className="drop-zone-content">
+                <span className="drop-zone-icon">📂</span>
+                <p className="drop-zone-label">Drop your file here, or click to browse</p>
+                <p className="drop-zone-sub">Supports PDF, Word (.docx), and plain text (.txt, .md)</p>
+              </div>
+            )}
+          </div>
+
+          <div className="drop-zone-divider"><span>or paste text directly</span></div>
+
+          <div className="form-field">
+            <label>Program Name <span className="label-optional">optional</span></label>
+            <input className="form-input" placeholder="e.g. Warehouse Safety Program"
+              value={programName} onChange={e => setProgramName(e.target.value)} />
+          </div>
+          <textarea
+            className="manual-textarea"
+            placeholder="Paste your training manual, safety requirements, or job description here..."
+            value={manualText}
+            onChange={e => { setManualText(e.target.value); if (e.target.value !== manualText) setDroppedFile(null) }}
+            rows={6}
+          />
+          {error && <p className="auth-error" style={{ marginTop: '0.5rem' }}>{error}</p>}
+          <button className="auth-submit" style={{ marginTop: '0.75rem', alignSelf: 'flex-start' }}
+            onClick={handleGenerate} disabled={generating || extracting}>
+            {generating ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                Analyzing with Claude<span className="thinking-dots"><span /><span /><span /></span>
+              </span>
+            ) : 'Analyze & Generate Program →'}
+          </button>
+        </div>
+      )}
+
+      {preview && (
+        <div className="panel program-preview-card">
+          <div className="panel-label"><span>✦</span><span>Program Generated</span></div>
+          <h3 className="preview-prog-name">{preview.program_def?.program_name}</h3>
+          <p className="preview-prog-desc">{preview.program_def?.description}</p>
+          <div className="preview-skills">
+            {(preview.program_def?.skills || []).map((sk, i) => (
+              <div key={i} className="preview-skill-card">
+                <div className="preview-skill-header">
+                  <span className="preview-skill-name">{sk.display_name}</span>
+                  <span className="preview-skill-id">{sk.skill_id.split(':').pop()}</span>
+                </div>
+                <p className="preview-skill-context">{sk.coaching_context}</p>
+                <div className="preview-rules">
+                  {sk.form_rules?.map((r, j) => (
+                    <span key={j} className="rule-chip-sm">
+                      {r.joint} {r.op === 'gt' ? '>' : '<'} {r.value}°
+                    </span>
+                  ))}
+                </div>
+                <p className="preview-cert-meta">
+                  Complete after {sk.certification?.min_sessions} sessions · Min score {sk.certification?.min_avg_score}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {programs.length === 0 && !showUpload ? (
+        <div className="dash-empty-state">
+          <span className="dash-empty-icon">📋</span>
+          <p>No training programs yet.</p>
+          <p className="text-muted">Upload a training manual to automatically generate a structured program with AI-defined skills.</p>
+        </div>
+      ) : (
+        <div className="program-list">
+          {programs.map(prog => (
+            <div key={prog.id} className="program-card">
+              <div className="program-card-header">
+                <div>
+                  <h3 className="program-card-name">{prog.name}</h3>
+                  {prog.description && <p className="program-card-desc">{prog.description}</p>}
+                </div>
+                <span className="count-pill">{prog.skill_ids?.length || 0} skills</span>
+              </div>
+              <div className="program-skill-chips">
+                {(prog.skills_info || []).map(sk => (
+                  <span key={sk.skill_id} className="skill-chip">{sk.display_name}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
