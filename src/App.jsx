@@ -77,29 +77,33 @@ function TrainingPage({ onBack }) {
 
   // Start webcam
   useEffect(() => {
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, facingMode: 'user' }
-        })
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, facingMode: 'user' }
+      })
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.onloadedmetadata = () => {
           setCameraReady(true)
         }
-      } catch (err) {
-        console.error('Camera error:', err)
-        setCoachingTip('Unable to access camera. Please allow camera permissions.')
       }
+    } catch (err) {
+      console.error('Camera error:', err)
+      // Force ready anyway so button isn't blocked
+      setCameraReady(true)
+      setCoachingTip('Camera unavailable — coaching still works.')
     }
-    startCamera()
+  }
+  startCamera()
 
-    return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(track => track.stop())
-      }
-      if (intervalRef.current) clearInterval(intervalRef.current)
+  return () => {
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(t => t.stop())
     }
-  }, [])
+    if (intervalRef.current) clearInterval(intervalRef.current)
+  }
+}, [])
 
   // Capture frame and send to backend
   const captureAndSend = useCallback(async () => {
@@ -124,23 +128,29 @@ function TrainingPage({ onBack }) {
     // const data = await response.json()
     // ============================================
 
-    // MOCK DATA (simulates backend response)
-    const mockResponses = [
-      { coaching_tip: 'Keep your back straight! Bend at the knees, not the waist.', is_good_form: false, score: 55 },
-      { coaching_tip: 'Good knee position! Now engage your core muscles.', is_good_form: true, score: 72 },
-      { coaching_tip: 'Excellent form! Keep the object close to your body.', is_good_form: true, score: 88 },
-      { coaching_tip: 'Watch your back angle — try to keep it more neutral.', is_good_form: false, score: 45 },
-      { coaching_tip: 'Great improvement! Your legs are doing the work now.', is_good_form: true, score: 82 },
-      { coaching_tip: 'Perfect lift! Smooth and controlled motion.', is_good_form: true, score: 95 },
-      { coaching_tip: 'Remember to breathe. Exhale as you lift up.', is_good_form: true, score: 78 },
-      { coaching_tip: 'Careful — your knees are going past your toes.', is_good_form: false, score: 50 },
-    ]
-    const data = mockResponses[Math.floor(Math.random() * mockResponses.length)]
+    let data
+    try {
+      const response = await fetch('http://localhost:8000/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      data = await response.json()
+    } catch (err) {
+      console.error('Backend error:', err)
+      return
+    }
 
     setCoachingTip(data.coaching_tip)
     setIsGoodForm(data.is_good_form)
     setCurrentScore(data.score)
     setScoreHistory(prev => [...prev, data.score])
+
+  // Speak the coaching tip aloud
+  const utterance = new SpeechSynthesisUtterance(data.coaching_tip)
+  utterance.rate = 1.0
+  utterance.pitch = 1.0
+  window.speechSynthesis.speak(utterance)
+
     if (data.is_good_form) {
       setRepCount(prev => prev + 1)
     }
@@ -148,6 +158,7 @@ function TrainingPage({ onBack }) {
 
   // Start/stop training loop
   const toggleTraining = () => {
+    window.speechSynthesis.cancel()
     if (isTraining) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
