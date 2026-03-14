@@ -3,57 +3,33 @@ import './App.css'
 
 function App() {
   const [page, setPage] = useState('landing')
-
-  if (page === 'landing') {
-    return <LandingPage onStart={() => setPage('training')} />
-  }
-
-  if (page === 'training') {
-    return <TrainingPage onBack={() => setPage('landing')} />
-  }
-
+  if (page === 'landing') return <LandingPage onStart={() => setPage('training')} />
+  if (page === 'training') return <TrainingPage onBack={() => setPage('landing')} />
   return null
 }
 
-/* ==================== LANDING PAGE ==================== */
 function LandingPage({ onStart }) {
   return (
     <div className="landing">
       <div className="landing-content">
         <div className="brand">
           <div className="logo-icon">🏗️</div>
-          <h1 className="brand-name">
-            Form<span className="highlight">Coach</span>
-          </h1>
+          <h1 className="brand-name">Form<span className="highlight">Coach</span></h1>
         </div>
-
         <p className="tagline">
           AI-powered training for skilled trades.
-          Practice safe lifting techniques with real-time
-          feedback from your personal AI coach.
+          Practice safe lifting techniques with real-time feedback from your personal AI coach.
         </p>
-
         <div className="features">
-          <span className="feature-pill">
-            <span className="dot"></span>Real-time correction
-          </span>
-          <span className="feature-pill">
-            <span className="dot"></span>Pose detection
-          </span>
-          <span className="feature-pill">
-            <span className="dot"></span>Voice coaching
-          </span>
-          <span className="feature-pill">
-            <span className="dot"></span>Progress tracking
-          </span>
+          <span className="feature-pill"><span className="dot"></span>Real-time correction</span>
+          <span className="feature-pill"><span className="dot"></span>Pose detection</span>
+          <span className="feature-pill"><span className="dot"></span>Voice coaching</span>
+          <span className="feature-pill"><span className="dot"></span>Progress tracking</span>
         </div>
-
         <button className="cta-button" onClick={onStart}>
-          Start Training
-          <span className="arrow">→</span>
+          Start Training <span className="arrow">→</span>
         </button>
       </div>
-
       <div className="bottom-bar">
         <span className="status-dot">System ready</span>
         <span>Skill² Tradeguard · Hackathon 2025</span>
@@ -62,10 +38,7 @@ function LandingPage({ onStart }) {
   )
 }
 
-/* ==================== TRAINING PAGE ==================== */
 function TrainingPage({ onBack }) {
-  const videoRef = useRef(null)
-  const canvasRef = useRef(null)
   const [cameraReady, setCameraReady] = useState(false)
   const [isTraining, setIsTraining] = useState(false)
   const [repCount, setRepCount] = useState(0)
@@ -75,59 +48,14 @@ function TrainingPage({ onBack }) {
   const [scoreHistory, setScoreHistory] = useState([])
   const intervalRef = useRef(null)
 
-  // Start webcam
   useEffect(() => {
-  async function startCamera() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' }
-      })
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.onloadedmetadata = () => {
-          setCameraReady(true)
-        }
-      }
-    } catch (err) {
-      console.error('Camera error:', err)
-      // Force ready anyway so button isn't blocked
-      setCameraReady(true)
-      setCoachingTip('Camera unavailable — coaching still works.')
+    setCameraReady(true)
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }
-  startCamera()
+  }, [])
 
-  return () => {
-    if (videoRef.current?.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(t => t.stop())
-    }
-    if (intervalRef.current) clearInterval(intervalRef.current)
-  }
-}, [])
-
-  // Capture frame and send to backend
   const captureAndSend = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current) return
-
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    canvas.width = 640
-    canvas.height = 480
-    ctx.drawImage(videoRef.current, 0, 0, 640, 480)
-
-    const frameData = canvas.toDataURL('image/jpeg', 0.7)
-
-    // ============================================
-    // TODO: Replace with real backend API call
-    //
-    // const response = await fetch('http://localhost:8000/analyze', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({ frame: frameData })
-    // })
-    // const data = await response.json()
-    // ============================================
-
     let data
     try {
       const response = await fetch('http://localhost:8000/coach', {
@@ -145,18 +73,14 @@ function TrainingPage({ onBack }) {
     setCurrentScore(data.score)
     setScoreHistory(prev => [...prev, data.score])
 
-  // Speak the coaching tip aloud
-  const utterance = new SpeechSynthesisUtterance(data.coaching_tip)
-  utterance.rate = 1.0
-  utterance.pitch = 1.0
-  window.speechSynthesis.speak(utterance)
+    const utterance = new SpeechSynthesisUtterance(data.coaching_tip)
+    utterance.rate = 1.0
+    utterance.pitch = 1.0
+    window.speechSynthesis.speak(utterance)
 
-    if (data.is_good_form) {
-      setRepCount(prev => prev + 1)
-    }
+    if (data.is_good_form) setRepCount(prev => prev + 1)
   }, [])
 
-  // Start/stop training loop
   const toggleTraining = () => {
     window.speechSynthesis.cancel()
     if (isTraining) {
@@ -177,34 +101,19 @@ function TrainingPage({ onBack }) {
 
   return (
     <div className="training">
-      {/* Top nav bar */}
       <header className="training-header">
-        <button className="back-btn" onClick={onBack}>
-          ← Back
-        </button>
-        <h1 className="training-title">
-          Lifting <span className="highlight">Training</span>
-        </h1>
+        <button className="back-btn" onClick={onBack}>← Back</button>
+        <h1 className="training-title">Lifting <span className="highlight">Training</span></h1>
         <div className="session-badge">
           <span className={`pulse-dot ${isTraining ? 'live' : ''}`}></span>
           {isTraining ? 'Live' : 'Ready'}
         </div>
       </header>
 
-      {/* Main content */}
       <div className="training-grid">
-
-        {/* LEFT: Camera */}
         <div className="camera-section">
           <div className="camera-container">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="camera-feed"
-            />
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            <img src="http://localhost:8000/video" className="camera-feed" alt="pose feed" />
 
             {currentScore !== null && isTraining && (
               <div className={`score-overlay ${isGoodForm ? 'good' : 'bad'}`}>
@@ -236,10 +145,7 @@ function TrainingPage({ onBack }) {
           </button>
         </div>
 
-        {/* RIGHT: Coaching + Stats */}
         <div className="info-section">
-
-          {/* Coaching panel */}
           <div className="panel coaching-panel">
             <div className="panel-header">
               <span className="panel-icon">🎯</span>
@@ -248,12 +154,9 @@ function TrainingPage({ onBack }) {
             <div className={`coaching-message ${isGoodForm === false ? 'warning' : isGoodForm === true ? 'success' : ''}`}>
               <p>{coachingTip}</p>
             </div>
-            <div className="coaching-sub">
-              Feedback updates every 2 seconds during training
-            </div>
+            <div className="coaching-sub">Feedback updates every 2 seconds during training</div>
           </div>
 
-          {/* Stats panel */}
           <div className="panel stats-panel">
             <div className="panel-header">
               <span className="panel-icon">📊</span>
@@ -279,7 +182,6 @@ function TrainingPage({ onBack }) {
             </div>
           </div>
 
-          {/* Score history chart */}
           {scoreHistory.length > 1 && (
             <div className="panel chart-panel">
               <div className="panel-header">
@@ -288,20 +190,12 @@ function TrainingPage({ onBack }) {
               </div>
               <div className="mini-chart">
                 {scoreHistory.map((score, i) => (
-                  <div
-                    key={i}
-                    className="chart-bar-wrapper"
-                    title={`Analysis ${i + 1}: ${score}/100`}
-                  >
+                  <div key={i} className="chart-bar-wrapper" title={`Analysis ${i + 1}: ${score}/100`}>
                     <div
                       className="chart-bar"
                       style={{
                         height: `${score}%`,
-                        background: score >= 70
-                          ? 'var(--accent)'
-                          : score >= 50
-                            ? 'var(--warning)'
-                            : 'var(--danger)'
+                        background: score >= 70 ? 'var(--accent)' : score >= 50 ? 'var(--warning)' : 'var(--danger)'
                       }}
                     />
                   </div>
